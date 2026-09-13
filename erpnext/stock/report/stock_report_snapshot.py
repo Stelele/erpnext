@@ -1,12 +1,13 @@
 # Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
 
+import os
 from contextlib import ExitStack, closing
 from datetime import timedelta
 from itertools import batched
 from operator import itemgetter
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkstemp
 from typing import NamedTuple
 
 import frappe
@@ -71,10 +72,11 @@ class StockReportSnapshot:
 		return rows if as_iterator else list(rows)
 
 	def register_query(self, name, query):
-		"""Keep an intermediate result in Arrow for reuse without creating a persistent table."""
+		"""Keep an intermediate result for reuse, spilled to disk like a large supporting table."""
 		cursor = self.execute_query(query)
 		try:
-			self.tables[name] = cursor.fetch_arrow_table()
+			reader = cursor.fetch_record_batch(BATCH_SIZE)
+			self.tables[name] = self.store_batches(name, reader, reader.schema)
 		finally:
 			cursor.close()
 
@@ -117,23 +119,24 @@ class StockReportSnapshot:
 		return self.tables[name]
 
 	def build_live_table(self, doctype):
-		"""Keep small lookups in memory and spill large ones to a reusable Arrow file."""
+		schema = arrow_schema(LIVE_TABLES[doctype].fields)
+		with closing(self.iter_live_batches(doctype, schema)) as reader:
+			return self.store_batches(doctype, reader, schema)
+
+	def store_batches(self, name, reader, schema):
+		"""Keep small results in memory and spill large ones to a reusable Arrow file."""
 		import pyarrow as pa
 
-		schema = arrow_schema(LIVE_TABLES[doctype].fields)
 		batches, size = [], 0
 		writer = None
 		with ExitStack() as stack:
-			reader = stack.enter_context(closing(self.iter_live_batches(doctype, schema)))
 			for batch in reader:
 				if writer is None:
 					batches.append(batch)
 					size += batch.nbytes
 					if size <= MAX_LIVE_TABLE_BYTES:
 						continue
-					if self.temp_directory is None:
-						self.temp_directory = TemporaryDirectory(prefix="stock-report-")
-					path = Path(self.temp_directory.name) / f"{doctype}.arrow"
+					path = self.get_spill_path(name)
 					writer = stack.enter_context(pa.ipc.new_file(str(path), schema))
 					for buffered in batches:
 						writer.write_batch(buffered)
@@ -146,6 +149,14 @@ class StockReportSnapshot:
 
 			return ds.dataset(path, format="ipc")
 		return pa.Table.from_batches(batches, schema=schema)
+
+	def get_spill_path(self, name):
+		"""A fresh file every time, because one name can be registered again within a report."""
+		if self.temp_directory is None:
+			self.temp_directory = TemporaryDirectory(prefix="stock-report-")
+		descriptor, path = mkstemp(suffix=".arrow", prefix=f"{name}-", dir=self.temp_directory.name)
+		os.close(descriptor)
+		return Path(path)
 
 	def iter_live_batches(self, doctype, schema):
 		import pyarrow as pa
