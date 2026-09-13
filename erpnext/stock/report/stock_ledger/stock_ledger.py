@@ -503,6 +503,7 @@ def get_stock_ledger_entries(filters, items, snapshot=None):
 		.where((sle.docstatus < 2) & (sle.is_cancelled == 0) & (sle.posting_datetime[from_date:to_date]))
 		.orderby(sle.posting_datetime)
 		.orderby(sle.creation)
+		.orderby(sle.name)
 	)
 
 	inventory_dimension_fields = get_inventory_dimension_fields()
