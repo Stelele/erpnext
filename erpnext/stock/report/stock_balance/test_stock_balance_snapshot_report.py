@@ -40,6 +40,17 @@ class TestStockBalanceSnapshotReport(StockSnapshotReportMixin, StockSnapshotTest
 		)
 		self.assert_snapshot_matches(stock_balance)
 
+	def test_movements_are_summed_as_floats(self):
+		receipt = self.make_movement(qty=1, basic_rate=100)
+		issue = self.make_movement(qty=1, from_warehouse="Stores - _TC", to_warehouse=None)
+		for entry, amount in ((receipt, 471636.5443), (issue, -459509.9528)):
+			frappe.db.set_value(
+				"Stock Ledger Entry",
+				{"voucher_no": entry.name},
+				{"actual_qty": amount, "stock_value_difference": amount},
+			)
+		self.assert_snapshot_matches(stock_balance)
+
 	def test_stock_balance_aggregates_before_python(self):
 		self.make_movement(qty=10, basic_rate=100, posting_date=add_days(today(), -10))
 		self.make_movement(qty=5, basic_rate=150)
