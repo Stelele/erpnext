@@ -19,7 +19,7 @@ from erpnext.stock.report.stock_ageing.stock_ageing_snapshot import (
 	LAYER_KEYS,
 	RESOLVED_KEYS,
 )
-from erpnext.stock.report.stock_report_snapshot import StockReportSnapshot
+from erpnext.stock.report.stock_report_snapshot import LIVE_TABLES, StockReportSnapshot, arrow_schema
 from erpnext.tests.utils import ERPNextTestSuite
 
 
@@ -244,7 +244,8 @@ class TestStockAgeingSnapshot(ERPNextTestSuite):
 		with duckdb.connect(":memory:") as conn:
 			conn.from_arrow(self.as_arrow(rows)).create("tabStock Ledger Entry")
 			snapshot = StockReportSnapshot.__new__(StockReportSnapshot)
-			snapshot.conn, snapshot.filters, snapshot.tables = conn, {}, {}
+			snapshot.conn, snapshot.filters = conn, {}
+			snapshot.tables = self.live_tables(batchwise, serial_bundles, batch_bundles)
 			fifo.snapshot = snapshot
 			ledger = frappe.qb.DocType("Stock Ledger Entry")
 			fields = [ledger[field] for field in DETAIL_FIELDS if field != "name"]
@@ -278,6 +279,34 @@ class TestStockAgeingSnapshot(ERPNextTestSuite):
 		fifo._recompute_moving_average_slots()
 		fifo._rebalance_batch_slots()
 		return fifo.item_details
+
+	def live_tables(self, batchwise, serial_bundles, batch_bundles):
+		flags, entries = dict(batchwise or {}), []
+		for parent, serials in (serial_bundles or {}).items():
+			for index, serial in enumerate(serials, 1):
+				entries.append({"parent": parent, "idx": index, "serial_no": serial, "docstatus": 1})
+		for parent, batches in (batch_bundles or {}).items():
+			for index, (batch, flag, qty, value) in enumerate(batches, 1):
+				entries.append(
+					{
+						"parent": parent,
+						"idx": index,
+						"batch_no": batch,
+						"qty": qty,
+						"stock_value_difference": value,
+						"docstatus": 1,
+					}
+				)
+				flags[batch] = flag
+		batches = [{"name": name, "use_batchwise_valuation": flag} for name, flag in flags.items()]
+		return {
+			"tabSerial and Batch Entry": self.live_table("Serial and Batch Entry", entries),
+			"tabBatch": self.live_table("Batch", batches),
+		}
+
+	@staticmethod
+	def live_table(doctype, rows):
+		return pa.Table.from_pylist(rows, schema=arrow_schema(LIVE_TABLES[doctype].fields))
 
 	def make_fifo(self, rows, method, batchwise=None):
 		fifo = FIFOSlots(frappe._dict(company="_Test Company", to_date="2026-12-31"), deepcopy(rows))
