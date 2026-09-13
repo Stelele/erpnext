@@ -51,7 +51,7 @@ class SnapshotFIFO(FIFOLayers):
 			ledger.posting_datetime, ledger.creation, ledger.name.as_("entry_name")
 		)
 
-	def generate(self, serial_bundles=None, batch_bundles=None) -> SnapshotFIFOResult | None:
+	def generate(self) -> SnapshotFIFOResult | None:
 		"""Return aggregated groups and optional replay, or None when every entry needs replay."""
 		summaries = self.snapshot.run(self.get_summary_query(), as_dict=True)
 		if len({row.first_order for row in summaries}) != len(summaries):
@@ -60,9 +60,9 @@ class SnapshotFIFO(FIFOLayers):
 		tracked_layers, date_events = {}, []
 		tracked = [row for row in summaries if self.can_aggregate_tracked(row)]
 		if tracked:
-			tracked_layers, date_events = TrackedFIFO(
-				self.fifo, self.ledger_entries, serial_bundles or {}, batch_bundles or {}, tracked
-			).generate(tracked)
+			tracked_layers, date_events = TrackedFIFO(self.fifo, self.ledger_entries, tracked).generate(
+				tracked
+			)
 		if summaries and not (eligible or tracked_layers):
 			return None
 

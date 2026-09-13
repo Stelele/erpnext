@@ -186,8 +186,16 @@ class StockReportSnapshot:
 				query = query.where(ledger[key].isin(values))
 		if to_date := self.filters.get("to_date"):
 			query = query.where(ledger.posting_date <= to_date)
+		if bundle_field := LIVE_TABLES[doctype].bundle_field:
+			query = query.union(self.get_bundle_values(bundle_field))
 		with closing(self.run(query, pluck=True, as_iterator=True)) as rows:
 			yield from (value for value in rows if value)
+
+	@staticmethod
+	def get_bundle_values(field):
+		"""Keys that only appear inside the bundles of the ledger entries in scope."""
+		entries = frappe.qb.DocType("Serial and Batch Entry")
+		return frappe.qb.from_(entries).select(entries[field]).distinct().where(entries[field].notnull())
 
 	@staticmethod
 	def iter_rows(cursor, as_dict, pluck):
@@ -246,13 +254,15 @@ class LiveTable(NamedTuple):
 	"""A supporting doctype read from the live database for the queries that need it.
 
 	`ledger_field` is the Stock Ledger Entry column holding its keys and `link_field` the column
-	those keys match. `scope` names report filters that narrow it further than those keys.
+	those keys match. `scope` names report filters that narrow it further than those keys and
+	`bundle_field` a Serial and Batch Entry column that holds more of its keys.
 	"""
 
 	ledger_field: str
 	link_field: str
 	fields: dict[str, str]
 	scope: dict[str, str] | None = None
+	bundle_field: str | None = None
 
 
 LIVE_TABLES = {
@@ -277,13 +287,20 @@ LIVE_TABLES = {
 		"name",
 		{"name": "string", "lft": "int64", "rgt": "int64", "warehouse_type": "string"},
 	),
-	"Batch": LiveTable("batch_no", "name", {"name": "string", "use_batchwise_valuation": "int64"}),
+	"Batch": LiveTable(
+		"batch_no",
+		"name",
+		{"name": "string", "use_batchwise_valuation": "int64"},
+		bundle_field="batch_no",
+	),
 	"Stock Reconciliation": LiveTable("voucher_no", "name", {"name": "string", "purpose": "string"}),
 	"Serial and Batch Entry": LiveTable(
 		"serial_and_batch_bundle",
 		"parent",
 		{
 			"parent": "string",
+			"idx": "int64",
+			"serial_no": "string",
 			"qty": "float64",
 			"stock_value_difference": "float64",
 			"docstatus": "int64",

@@ -30,9 +30,9 @@ TRACKED_KEYS = "fifo_tracked_keys"
 class TrackedFIFO:
 	"""Resolve serial membership and batch valuation pools, retaining replay for unsafe histories."""
 
-	def __init__(self, fifo, ledger_entries, serial_bundles, batch_bundles, candidates):
+	def __init__(self, fifo, ledger_entries, candidates):
 		self.snapshot = fifo.snapshot
-		self.entries = TrackedFIFOEntries(fifo, ledger_entries, serial_bundles, batch_bundles, candidates)
+		self.entries = TrackedFIFOEntries(fifo, ledger_entries, candidates)
 		self.layers = FIFOLayers(GROUP_FIELDS, ORDER_FIELDS, ("tracking_no", "batchwise"))
 
 	def generate(self, summaries):

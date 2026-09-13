@@ -15,6 +15,7 @@ Subscripts = CustomFunction("generate_subscripts", ["value", "dimension"])
 Trim = CustomFunction("trim", ["value", "characters"])
 RegexpMatches = CustomFunction("regexp_matches", ["value", "pattern"])
 
+NON_ASCII = "[^\\x00-\\x7f]"
 ORDER_FIELDS = ("posting_datetime", "creation", "entry_name", "bundle_index")
 GROUP_FIELDS = ("name", "warehouse", "valuation_pool")
 
@@ -22,7 +23,7 @@ GROUP_FIELDS = ("name", "warehouse", "valuation_pool")
 class TrackedFIFOEntries:
 	"""Expand legacy fields and bundles into ordered serial or batch movements in DuckDB."""
 
-	def __init__(self, fifo, ledger_entries, serial_bundles, batch_bundles, candidates):
+	def __init__(self, fifo, ledger_entries, candidates):
 		self.snapshot = fifo.snapshot
 		self.ledger_entries = ledger_entries
 		self.snapshot.register(
@@ -38,15 +39,7 @@ class TrackedFIFOEntries:
 			frappe.qb.from_(source).join(keys).on(FIFOLayers().same_stock(source, keys)).select(source.star)
 		)
 		self.snapshot.register_query("fifo_tracked_source", query)
-		self.register_bundles(serial_bundles, batch_bundles)
-		self.snapshot.register(
-			"fifo_batch_flags",
-			[
-				{"batch_no": name, "batchwise": flag}
-				for name, flag in fifo.batchwise_valuation_by_batch.items()
-			],
-			{"batch_no": "string", "batchwise": "int64"},
-		)
+		self.snapshot.register_query("fifo_bundle_entries", self.get_bundle_entries_query())
 
 	def get_query(self, serial):
 		ledger = frappe.qb.Table("fifo_tracked_source")
@@ -97,7 +90,7 @@ class TrackedFIFOEntries:
 		return (
 			frappe.qb.from_(ledger)
 			.select(
-				*self.source_fields(ledger),
+				*self.source_fields(ledger, self.legacy_text_supported(ledger)),
 				Upper(Trim(Unnest(serials), " \t\n\r\v\f\x1c\x1d\x1e\x1f")).as_("tracking_no"),
 				Subscripts(serials, 1).as_("bundle_index"),
 				Cast(0, "BIGINT").as_("batchwise"),
@@ -107,16 +100,16 @@ class TrackedFIFOEntries:
 		)
 
 	def get_legacy_batch_query(self, ledger):
-		flags = frappe.qb.Table("fifo_batch_flags")
+		batch = frappe.qb.DocType("Batch")
 		return (
 			frappe.qb.from_(ledger)
-			.left_join(flags)
-			.on(ledger.batch_no == flags.batch_no)
+			.left_join(batch)
+			.on(ledger.batch_no == batch.name)
 			.select(
-				*self.source_fields(ledger),
+				*self.source_fields(ledger, self.legacy_text_supported(ledger)),
 				Upper(IfNull(ledger.batch_no, "")).as_("tracking_no"),
 				Cast(0, "BIGINT").as_("bundle_index"),
-				flags.batchwise,
+				batch.use_batchwise_valuation.as_("batchwise"),
 				*self.movement_fields(ledger, serial=False),
 			)
 			.where(
@@ -133,7 +126,7 @@ class TrackedFIFOEntries:
 			.join(bundle)
 			.on((ledger.serial_and_batch_bundle == bundle.parent) & (bundle.is_serial == int(serial)))
 			.select(
-				*self.source_fields(ledger),
+				*self.source_fields(ledger, bundle.text_supported),
 				bundle.tracking_no,
 				bundle.bundle_index,
 				bundle.batchwise,
@@ -147,7 +140,7 @@ class TrackedFIFOEntries:
 		)
 
 	@staticmethod
-	def source_fields(ledger):
+	def source_fields(ledger, text_supported):
 		return [
 			ledger.name,
 			ledger.warehouse,
@@ -160,17 +153,7 @@ class TrackedFIFOEntries:
 			ledger.qty_after_transaction.as_("source_balance"),
 			ledger.running_qty,
 			Case().when(IfNull(ledger.serial_no, "") != "", 1).else_(0).as_("has_legacy_serial"),
-			# Python and DuckDB can uppercase non-ASCII identifiers differently. Bundles already
-			# contain Python-normalized identifiers; retain replay for non-ASCII legacy fields.
-			Case()
-			.when(IfNull(ledger.serial_and_batch_bundle, "") != "", 1)
-			.when(
-				RegexpMatches(IfNull(ledger.serial_no, ""), "[^\\x00-\\x7f]")
-				| RegexpMatches(IfNull(ledger.batch_no, ""), "[^\\x00-\\x7f]"),
-				0,
-			)
-			.else_(1)
-			.as_("text_supported"),
+			text_supported.as_("text_supported"),
 			Cast(ledger.actual_qty, "DOUBLE").as_("source_qty"),
 		]
 
@@ -190,34 +173,43 @@ class TrackedFIFOEntries:
 			Case().when(source_qty > 0, value).else_(-Abs(value)).as_("stock_value_difference"),
 		]
 
-	def register_bundles(self, serial_bundles, batch_bundles):
-		rows = []
-		for parent, serials in serial_bundles.items():
-			for index, serial in enumerate(serials):
-				rows.append(dict(parent=parent, tracking_no=serial.upper(), bundle_index=index, is_serial=1))
-		for parent, batches in batch_bundles.items():
-			for index, (batch, flag, qty, value) in enumerate(batches):
-				rows.append(
-					dict(
-						parent=parent,
-						tracking_no=batch,
-						bundle_index=index,
-						is_serial=0,
-						batchwise=flag,
-						qty=qty,
-						value=value,
-					)
-				)
-		self.snapshot.register(
-			"fifo_bundle_entries",
-			rows,
-			{
-				"parent": "string",
-				"tracking_no": "string",
-				"bundle_index": "int64",
-				"is_serial": "int64",
-				"batchwise": "int64",
-				"qty": "float64",
-				"value": "float64",
-			},
+	@staticmethod
+	def legacy_text_supported(ledger):
+		"""Python and DuckDB can uppercase non-ASCII identifiers differently."""
+		non_ascii = RegexpMatches(IfNull(ledger.serial_no, ""), NON_ASCII) | RegexpMatches(
+			IfNull(ledger.batch_no, ""), NON_ASCII
 		)
+		return Case().when(non_ascii, 0).else_(1)
+
+	def get_bundle_entries_query(self):
+		"""Serial and batch entries of submitted bundles, as the live report reads them."""
+		entry = frappe.qb.DocType("Serial and Batch Entry")
+		batch = frappe.qb.DocType("Batch")
+		serials = (
+			frappe.qb.from_(entry)
+			.select(*self.bundle_fields(entry, entry.serial_no, Cast(1, "BIGINT"), Cast(0, "BIGINT")))
+			.where((entry.docstatus == 1) & entry.serial_no.isnotnull())
+		)
+		batches = (
+			frappe.qb.from_(entry)
+			.join(batch)
+			.on(entry.batch_no == batch.name)
+			.select(
+				*self.bundle_fields(entry, entry.batch_no, Cast(0, "BIGINT"), batch.use_batchwise_valuation)
+			)
+			.where((entry.docstatus == 1) & entry.batch_no.isnotnull())
+		)
+		return serials.union_all(batches)
+
+	@staticmethod
+	def bundle_fields(entry, number, is_serial, batchwise):
+		return [
+			entry.parent,
+			Upper(number).as_("tracking_no"),
+			entry.idx.as_("bundle_index"),
+			is_serial.as_("is_serial"),
+			batchwise.as_("batchwise"),
+			Abs(entry.qty).as_("qty"),
+			Abs(entry.stock_value_difference).as_("value"),
+			Case().when(RegexpMatches(number, NON_ASCII), 0).else_(1).as_("text_supported"),
+		]

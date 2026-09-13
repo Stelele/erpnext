@@ -377,7 +377,7 @@ class FIFOSlots:
 	def _generate_from_snapshot(self, serial_bundles: dict, batch_bundles: dict) -> bool:
 		from erpnext.stock.report.stock_ageing.stock_ageing_snapshot import SnapshotFIFO
 
-		result = SnapshotFIFO(self).generate(serial_bundles, batch_bundles)
+		result = SnapshotFIFO(self).generate()
 		if result is None:
 			return False
 
