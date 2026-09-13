@@ -403,7 +403,7 @@ class FIFOSlots:
 		event = next(events, None)
 		for row in rows:
 			if date_events:
-				order = (row.pop("posting_datetime"), row.pop("creation"))
+				order = (row.pop("posting_datetime"), row.pop("creation"), row.pop("entry_name"))
 				while event and event.order < order:
 					self._remember_receipt_date(event)
 					event = next(events, None)

@@ -15,7 +15,7 @@ Subscripts = CustomFunction("generate_subscripts", ["value", "dimension"])
 Trim = CustomFunction("trim", ["value", "characters"])
 RegexpMatches = CustomFunction("regexp_matches", ["value", "pattern"])
 
-ORDER_FIELDS = ("posting_datetime", "creation", "bundle_index")
+ORDER_FIELDS = ("posting_datetime", "creation", "entry_name", "bundle_index")
 GROUP_FIELDS = ("name", "warehouse", "valuation_pool")
 
 
@@ -73,6 +73,7 @@ class TrackedFIFOEntries:
 					"warehouse",
 					"posting_datetime",
 					"creation",
+					"entry_name",
 					"posting_date",
 					"voucher_type",
 					"qty_after_transaction",
@@ -85,7 +86,9 @@ class TrackedFIFOEntries:
 					"serial_and_batch_bundle",
 				)
 			),
-			WindowCount("*").over(ledger.posting_datetime, ledger.creation).as_("order_multiplicity"),
+			WindowCount("*")
+			.over(ledger.posting_datetime, ledger.creation, ledger.entry_name)
+			.as_("order_multiplicity"),
 			FIFOLayers().running_sum(Cast(ledger.actual_qty, "DOUBLE"), ledger).as_("running_qty"),
 		)
 
@@ -150,6 +153,7 @@ class TrackedFIFOEntries:
 			ledger.warehouse,
 			ledger.posting_datetime,
 			ledger.creation,
+			ledger.entry_name,
 			ledger.posting_date,
 			ledger.voucher_type,
 			ledger.order_multiplicity,

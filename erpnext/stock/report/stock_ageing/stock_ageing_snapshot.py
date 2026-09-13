@@ -128,7 +128,9 @@ class SnapshotFIFO(FIFOLayers):
 	def get_replay_query(self, with_order=False) -> QueryBuilder:
 		"""Entries left to the existing replay. Rows without a warehouse never match a key."""
 		entries, keys = frappe.qb.Table("fifo_replay"), frappe.qb.Table(RESOLVED_KEYS)
-		fields = (*DETAIL_FIELDS, "posting_datetime", "creation") if with_order else DETAIL_FIELDS
+		fields = DETAIL_FIELDS
+		if with_order:
+			fields = (*DETAIL_FIELDS, "posting_datetime", "creation", "entry_name")
 		return (
 			frappe.qb.with_(self.ledger_entries, "fifo_replay")
 			.from_(entries)

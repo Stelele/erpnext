@@ -21,7 +21,7 @@ MAX_EXACT_SCALED_SUM = 2**52
 
 
 class ReceiptDate(NamedTuple):
-	order: tuple[datetime, datetime]
+	order: tuple[datetime, datetime, str]
 	is_serial: bool
 	number: str
 	date: date

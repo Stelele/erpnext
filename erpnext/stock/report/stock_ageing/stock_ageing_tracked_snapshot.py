@@ -84,7 +84,7 @@ class TrackedFIFO:
 			events.star,
 			self.layers.running_sum(events.actual_qty, events).as_("pool_qty"),
 			WindowSum(Abs(events.actual_qty))
-			.over(events.name, events.warehouse, events.posting_datetime, events.creation)
+			.over(events.name, events.warehouse, events.posting_datetime, events.creation, events.entry_name)
 			.as_("row_qty"),
 		)
 		if not serial:
@@ -126,7 +126,7 @@ class TrackedFIFO:
 			.select(
 				progress.name,
 				progress.warehouse,
-				Count(Function("row", progress.posting_datetime, progress.creation))
+				Count(Function("row", progress.posting_datetime, progress.creation, progress.entry_name))
 				.distinct()
 				.as_("row_count"),
 				Max(Case().when(unsupported, 1).else_(0)).as_("unsupported"),
@@ -184,7 +184,7 @@ class TrackedFIFO:
 	@staticmethod
 	def get_dates_query(query):
 		events = query.as_("receipt_dates")
-		order = Function("row", events.posting_datetime, events.creation)
+		order = Function("row", events.posting_datetime, events.creation, events.entry_name)
 		return (
 			frappe.qb.from_(events)
 			.select(Min(order), events.tracking_no, ArgMin(events.posting_date, order))
