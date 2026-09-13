@@ -23,7 +23,8 @@ ArgMin = CustomFunction("arg_min_null", ["value", "order"])
 ArgMax = CustomFunction("arg_max_null", ["value", "order"])
 Row = CustomFunction("row", ["posting_datetime", "creation", "entry_name"])
 
-FAST_KEYS = "fifo_fast_keys"
+LAYER_KEYS = "fifo_layer_keys"
+RESOLVED_KEYS = "fifo_resolved_keys"
 
 StockKey = tuple[str, str | None]
 
@@ -67,7 +68,7 @@ class SnapshotFIFO(FIFOLayers):
 
 		entries = self.ledger_entries
 		if len(eligible) != len(summaries):
-			self.register_fast_keys([self.stock_key(row) for row in eligible])
+			self.register_keys(LAYER_KEYS, [self.stock_key(row) for row in eligible])
 			entries = self.get_fast_entries()
 
 		layers = self.get_surviving_layers(entries) if eligible else {}
@@ -82,7 +83,7 @@ class SnapshotFIFO(FIFOLayers):
 		)
 		replay_query = None
 		if len(details) != len(summaries):
-			self.register_fast_keys(list(details))
+			self.register_keys(RESOLVED_KEYS, list(details))
 			replay_query = self.get_replay_query(with_order=bool(date_events))
 		return SnapshotFIFOResult(
 			details,
@@ -107,10 +108,10 @@ class SnapshotFIFO(FIFOLayers):
 			"has_batch_no": row.has_batch_no,
 		}
 
-	def register_fast_keys(self, keys: list[StockKey]) -> None:
-		"""Publish the aggregated groups to DuckDB so the split needs no parameter per group."""
+	def register_keys(self, table: str, keys: list[StockKey]) -> None:
+		"""Publish a set of groups to DuckDB so joining on them needs no parameter per group."""
 		rows = [{"name": name, "warehouse": warehouse} for name, warehouse in keys]
-		self.snapshot.register(FAST_KEYS, rows, {"name": "string", "warehouse": "string"})
+		self.snapshot.register(table, rows, {"name": "string", "warehouse": "string"})
 
 	def get_surviving_layers(self, entries: QueryBuilder) -> dict[StockKey, list]:
 		layers = defaultdict(list)
@@ -121,12 +122,12 @@ class SnapshotFIFO(FIFOLayers):
 		return dict(layers)
 
 	def get_fast_entries(self) -> QueryBuilder:
-		entries, keys = self.ledger_entries.as_("fifo_scope"), frappe.qb.Table(FAST_KEYS)
+		entries, keys = self.ledger_entries.as_("fifo_scope"), frappe.qb.Table(LAYER_KEYS)
 		return frappe.qb.from_(entries).join(keys).on(self.same_stock(entries, keys)).select(Star(entries))
 
 	def get_replay_query(self, with_order=False) -> QueryBuilder:
 		"""Entries left to the existing replay. Rows without a warehouse never match a key."""
-		entries, keys = frappe.qb.Table("fifo_replay"), frappe.qb.Table(FAST_KEYS)
+		entries, keys = frappe.qb.Table("fifo_replay"), frappe.qb.Table(RESOLVED_KEYS)
 		fields = (*DETAIL_FIELDS, "posting_datetime", "creation") if with_order else DETAIL_FIELDS
 		return (
 			frappe.qb.with_(self.ledger_entries, "fifo_replay")

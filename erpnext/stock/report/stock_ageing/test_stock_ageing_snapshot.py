@@ -16,7 +16,8 @@ import pyarrow as pa
 from erpnext.stock.report.stock_ageing.stock_ageing import FIFOSlots
 from erpnext.stock.report.stock_ageing.stock_ageing_snapshot import (
 	DETAIL_FIELDS,
-	FAST_KEYS,
+	LAYER_KEYS,
+	RESOLVED_KEYS,
 )
 from erpnext.stock.report.stock_report_snapshot import StockReportSnapshot
 from erpnext.tests.utils import ERPNextTestSuite
@@ -220,7 +221,7 @@ class TestStockAgeingSnapshot(ERPNextTestSuite):
 
 		def record(query):
 			sql, parameters = compile_query(query)
-			if FAST_KEYS in sql:
+			if LAYER_KEYS in sql or RESOLVED_KEYS in sql:
 				counts.append(len(parameters))
 			return sql, parameters
 
