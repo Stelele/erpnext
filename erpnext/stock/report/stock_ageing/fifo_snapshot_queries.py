@@ -1,6 +1,9 @@
 # Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
 
+from datetime import date, datetime
+from typing import NamedTuple
+
 import frappe
 from frappe.query_builder import Case, Criterion, CustomFunction
 from frappe.query_builder.functions import Abs, IfNull, Max
@@ -10,6 +13,18 @@ from pypika.queries import QueryBuilder
 
 ArgMax = CustomFunction("arg_max_null", ["value", "order"])
 Least = CustomFunction("least", ["left", "right"])
+
+# Scaling by a power of two admits exact binary fractions. Keep scaled totals below 2**52
+# to leave headroom for intermediate additions and subtractions in the layer calculation.
+BINARY_FRACTION_SCALE = 1024
+MAX_EXACT_SCALED_SUM = 2**52
+
+
+class ReceiptDate(NamedTuple):
+	order: tuple[datetime, datetime]
+	is_serial: bool
+	number: str
+	date: date
 
 
 class FIFOLayers:

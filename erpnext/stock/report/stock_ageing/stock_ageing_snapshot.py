@@ -2,7 +2,6 @@
 # License: GNU General Public License v3. See license.txt
 
 from collections import defaultdict
-from datetime import date, datetime
 from typing import NamedTuple
 
 import frappe
@@ -11,27 +10,22 @@ from frappe.query_builder.functions import Abs, Cast, Count, Floor, IfNull, Max,
 from pypika.queries import QueryBuilder
 from pypika.terms import Star
 
-from erpnext.stock.report.stock_ageing.fifo_snapshot_queries import FIFOLayers
+from erpnext.stock.report.stock_ageing.fifo_snapshot_queries import (
+	BINARY_FRACTION_SCALE,
+	MAX_EXACT_SCALED_SUM,
+	FIFOLayers,
+	ReceiptDate,
+)
 from erpnext.stock.report.stock_ageing.stock_ageing import DETAIL_FIELDS
+from erpnext.stock.report.stock_ageing.stock_ageing_tracked_snapshot import TrackedFIFO
 
 ArgMin = CustomFunction("arg_min_null", ["value", "order"])
 ArgMax = CustomFunction("arg_max_null", ["value", "order"])
 Row = CustomFunction("row", ["posting_datetime", "creation", "entry_name"])
 
 FAST_KEYS = "fifo_fast_keys"
-# Scaling by a power of two admits exact binary fractions. Keep scaled totals below 2**52
-# to leave headroom for intermediate additions and subtractions in the layer calculation.
-BINARY_FRACTION_SCALE = 1024
-MAX_EXACT_SCALED_SUM = 2**52
 
 StockKey = tuple[str, str | None]
-
-
-class ReceiptDate(NamedTuple):
-	order: tuple[datetime, datetime]
-	is_serial: bool
-	number: str
-	date: date
 
 
 class SnapshotFIFOResult(NamedTuple):
@@ -65,8 +59,6 @@ class SnapshotFIFO(FIFOLayers):
 		tracked_layers, date_events = {}, []
 		tracked = [row for row in summaries if self.can_aggregate_tracked(row)]
 		if tracked:
-			from erpnext.stock.report.stock_ageing.stock_ageing_tracked_snapshot import TrackedFIFO
-
 			tracked_layers, date_events = TrackedFIFO(
 				self.fifo, self.ledger_entries, serial_bundles or {}, batch_bundles or {}, tracked
 			).generate(tracked)

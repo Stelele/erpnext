@@ -10,7 +10,12 @@ from pypika.analytics import Max as WindowMax
 from pypika.analytics import Min as WindowMin
 from pypika.analytics import Sum as WindowSum
 
-from erpnext.stock.report.stock_ageing.fifo_snapshot_queries import FIFOLayers
+from erpnext.stock.report.stock_ageing.fifo_snapshot_queries import (
+	BINARY_FRACTION_SCALE,
+	MAX_EXACT_SCALED_SUM,
+	FIFOLayers,
+	ReceiptDate,
+)
 from erpnext.stock.report.stock_ageing.tracked_fifo_snapshot_queries import (
 	GROUP_FIELDS,
 	ORDER_FIELDS,
@@ -31,8 +36,6 @@ class TrackedFIFO:
 		self.layers = FIFOLayers(GROUP_FIELDS, ORDER_FIELDS, ("tracking_no", "batchwise"))
 
 	def generate(self, summaries):
-		from erpnext.stock.report.stock_ageing.stock_ageing_snapshot import ReceiptDate
-
 		queues, date_events = {}, []
 		for serial in (True, False):
 			expected = {
@@ -64,8 +67,6 @@ class TrackedFIFO:
 
 	@staticmethod
 	def can_aggregate(row, expected, serial):
-		from erpnext.stock.report.stock_ageing.stock_ageing_snapshot import MAX_EXACT_SCALED_SUM
-
 		return (
 			expected is not None
 			and expected.warehouse is not None
@@ -78,8 +79,6 @@ class TrackedFIFO:
 		)
 
 	def get_summary_query(self, query, serial):
-		from erpnext.stock.report.stock_ageing.stock_ageing_snapshot import BINARY_FRACTION_SCALE
-
 		events = query.as_("tracked_events")
 		progress_query = frappe.qb.from_(events).select(
 			events.star,
