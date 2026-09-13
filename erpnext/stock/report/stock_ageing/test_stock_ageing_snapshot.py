@@ -138,6 +138,13 @@ class TestStockAgeingSnapshot(ERPNextTestSuite):
 			},
 		)
 
+	def test_tied_tracked_timestamps_are_ordered_by_entry_name(self):
+		for serial in (False, True):
+			with self.subTest(serial=serial):
+				rows = self.tracked_rows([(1, 100, "A"), (1, 120, "B"), (-1, -100, "A")], serial)
+				rows[1].update(posting_datetime=rows[0].posting_datetime, creation=rows[0].creation)
+				self.assert_tracked_matches(rows, batchwise={"A": 1, "B": 1})
+
 	def test_optimized_receipt_dates_are_interleaved_with_replay(self):
 		for serial in (False, True):
 			for first_warehouse in ("Optimized", "Replayed"):
