@@ -85,7 +85,7 @@ def get_segment_query(report):
 		detail |= (field < 0) & (Abs(field) < 10**-report.float_precision)
 
 	return report.sle_query.select(
-		RowNumber().orderby(ledger.posting_datetime, ledger.creation).as_("snapshot_row"),
+		RowNumber().orderby(ledger.posting_datetime, ledger.creation, ledger.name).as_("snapshot_row"),
 		Case().when(opening, 1).else_(0).as_("snapshot_opening"),
 		Case().when(detail, 1).else_(0).as_("snapshot_detail"),
 	)
