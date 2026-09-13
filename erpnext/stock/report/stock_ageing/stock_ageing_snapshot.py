@@ -16,7 +16,7 @@ from erpnext.stock.report.stock_ageing.stock_ageing import DETAIL_FIELDS
 
 ArgMin = CustomFunction("arg_min_null", ["value", "order"])
 ArgMax = CustomFunction("arg_max_null", ["value", "order"])
-Row = CustomFunction("row", ["posting_datetime", "creation"])
+Row = CustomFunction("row", ["posting_datetime", "creation", "entry_name"])
 Least = CustomFunction("least", ["left", "right"])
 
 FAST_KEYS = "fifo_fast_keys"
@@ -44,7 +44,7 @@ class SnapshotFIFO:
 		self.snapshot = fifo.snapshot
 		ledger = frappe.qb.DocType("Stock Ledger Entry")
 		self.ledger_entries = fifo._get_stock_ledger_query(ordered=False).select(
-			ledger.posting_datetime, ledger.creation
+			ledger.posting_datetime, ledger.creation, ledger.name.as_("entry_name")
 		)
 
 	def generate(self) -> SnapshotFIFOResult | None:
@@ -112,7 +112,11 @@ class SnapshotFIFO:
 			.on(self.same_stock(entries, keys))
 			.select(*(Field(field, table=entries) for field in DETAIL_FIELDS))
 			.where(Field("name", table=keys).isnull())
-			.orderby(Field("posting_datetime", table=entries), Field("creation", table=entries))
+			.orderby(
+				Field("posting_datetime", table=entries),
+				Field("creation", table=entries),
+				Field("entry_name", table=entries),
+			)
 		)
 
 	def can_aggregate(self, row) -> bool:
@@ -128,7 +132,7 @@ class SnapshotFIFO:
 	def get_summary_query(self) -> QueryBuilder:
 		entries = frappe.qb.Table("fifo_entries")
 		progress = frappe.qb.Table("fifo_progress")
-		order = Row(progress.posting_datetime, progress.creation)
+		order = Row(progress.posting_datetime, progress.creation, progress.entry_name)
 		progress_query = frappe.qb.from_(entries).select(
 			entries.star, self.running_sum(entries.actual_qty, entries).as_("running_qty")
 		)
@@ -213,7 +217,13 @@ class SnapshotFIFO:
 				.as_("value"),
 			)
 			.where(receipts.in_qty > totals.out_qty)
-			.orderby(receipts.name, receipts.warehouse, receipts.posting_datetime, receipts.creation)
+			.orderby(
+				receipts.name,
+				receipts.warehouse,
+				receipts.posting_datetime,
+				receipts.creation,
+				receipts.entry_name,
+			)
 		)
 
 	def get_progress_query(self, entries) -> QueryBuilder:
@@ -225,6 +235,7 @@ class SnapshotFIFO:
 			entries.posting_date,
 			entries.posting_datetime,
 			entries.creation,
+			entries.entry_name,
 			*self.get_cumulative_columns(entries),
 		)
 
@@ -272,7 +283,7 @@ class SnapshotFIFO:
 		return (
 			WindowSum(value)
 			.over(table.name, table.warehouse)
-			.orderby(table.posting_datetime, table.creation)
+			.orderby(table.posting_datetime, table.creation, table.entry_name)
 			.rows(Preceding(), CURRENT_ROW)
 		)
 

@@ -1101,7 +1101,7 @@ class FIFOSlots:
 			if warehouses:
 				sle_query = sle_query.where(sle.warehouse.isin(warehouses))
 
-		return sle_query.orderby(sle.posting_datetime, sle.creation) if ordered else sle_query
+		return sle_query.orderby(sle.posting_datetime, sle.creation, sle.name) if ordered else sle_query
 
 	def _get_bundle_wise_serial_nos(self) -> dict:
 		bundle = frappe.qb.DocType("Serial and Batch Bundle")
