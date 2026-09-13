@@ -3,7 +3,7 @@
 
 import frappe
 from frappe.query_builder import Case, CustomFunction
-from frappe.query_builder.functions import Abs, Min, Sum
+from frappe.query_builder.functions import Abs, Cast, Min, Sum
 from pypika.analytics import CURRENT_ROW, Preceding, RowNumber
 from pypika.analytics import Sum as WindowSum
 
@@ -58,7 +58,10 @@ def get_balance_query(report):
 
 def get_movement_columns(segments):
 	opening = segments.snapshot_opening
-	amounts = {"qty": segments.actual_qty, "val": segments.stock_value_difference}
+	amounts = {
+		"qty": Cast(segments.actual_qty, "DOUBLE"),
+		"val": Cast(segments.stock_value_difference, "DOUBLE"),
+	}
 	columns = []
 	for suffix in MOVEMENT_SUFFIXES:
 		field = amounts[suffix]
