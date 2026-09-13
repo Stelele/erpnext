@@ -85,17 +85,19 @@ class TestStockAgeingSnapshot(ERPNextTestSuite):
 			row.stock_value_difference = 999999999999
 		self.assertIsNone(self.calculate(rows))
 
-	def test_reused_voucher_and_ambiguous_order_use_replay(self):
-		for fields in (("voucher_no",), ("posting_datetime", "creation")):
-			rows = self.make_rows(0)
-			for row in rows:
-				row.update(name="Item", warehouse="Warehouse")
-			other = next(
-				row for row in rows[1:] if (row.name, row.warehouse) == (rows[0].name, rows[0].warehouse)
-			)
-			for field in fields:
-				other[field] = rows[0][field]
-			self.assertIsNone(self.calculate(rows))
+	def test_reused_voucher_uses_replay(self):
+		rows = self.make_rows(0)
+		for row in rows:
+			row.update(name="Item", warehouse="Warehouse")
+		rows[1].voucher_no = rows[0].voucher_no
+		self.assertIsNone(self.calculate(rows))
+
+	def test_tied_timestamps_are_ordered_by_entry_name(self):
+		rows = self.make_rows(0)
+		for row in rows:
+			row.update(name="Item", warehouse="Warehouse")
+		rows[1].update(posting_datetime=rows[0].posting_datetime, creation=rows[0].creation)
+		self.assertEqual(self.calculate(rows), self.replay(rows))
 
 	def test_split_does_not_bind_a_parameter_per_group(self):
 		rows = self.make_rows(5)
@@ -128,7 +130,8 @@ class TestStockAgeingSnapshot(ERPNextTestSuite):
 			snapshot.conn, snapshot.filters, snapshot.tables = conn, {}, {}
 			fifo.snapshot = snapshot
 			ledger = frappe.qb.DocType("Stock Ledger Entry")
-			query = frappe.qb.from_(ledger).select(*(ledger[field] for field in DETAIL_FIELDS))
+			fields = [ledger[field] for field in DETAIL_FIELDS if field != "name"]
+			query = frappe.qb.from_(ledger).select(ledger.item_code.as_("name"), *fields)
 			with patch.object(
 				fifo,
 				"_get_stock_ledger_query",
@@ -196,8 +199,9 @@ class TestStockAgeingSnapshot(ERPNextTestSuite):
 
 	def as_arrow(self, rows):
 		rows = deepcopy(rows)
-		for row in rows:
+		for index, row in enumerate(rows):
 			row.item_code = row.name
+			row.name = f"SLE-{index:03d}"
 		decimals = {"actual_qty", "qty_after_transaction", "stock_value_difference", "valuation_rate"}
 		fields = []
 		for field in (*DETAIL_FIELDS, "posting_datetime", "creation", "item_code"):
