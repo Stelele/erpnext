@@ -123,8 +123,29 @@ def filter_result_items(result, pos_profile):
 
 @frappe.whitelist()
 def get_parent_item_group(pos_profile: str):
-	item_groups = get_item_groups(pos_profile)
+	profile = frappe.get_cached_doc("POS Profile", pos_profile)
 
+	# Default to the closest common ancestor of the profile's configured item
+	# groups, so the grid opens on the whole scoped catalog deterministically.
+	# get_item_groups() returns list(set(...)) whose iteration order varies per
+	# process; the previous item_groups[0] pick could resolve to a narrow or
+	# empty subtree and hide most of the catalog after a worker restart.
+	item_groups = [row.item_group for row in profile.get("item_groups") or []]
+	if item_groups:
+		rows = frappe.get_all("Item Group", filters={"name": ("in", item_groups)}, fields=["lft", "rgt"])
+		if rows:
+			return frappe.get_all(
+				"Item Group",
+				filters={
+					"lft": ("<=", min(r.lft for r in rows)),
+					"rgt": (">=", max(r.rgt for r in rows)),
+				},
+				pluck="name",
+				order_by="lft desc",
+				limit=1,
+			)[0]
+
+	item_groups = get_item_groups(pos_profile)
 	if not item_groups:
 		item_groups = frappe.get_all("Item Group", {"lft": 1, "is_group": 1}, pluck="name")
 
