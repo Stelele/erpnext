@@ -21,8 +21,12 @@ import random
 import unittest
 
 import frappe
-from frappe.tests import IntegrationTestCase
 from frappe.utils import get_datetime
+
+try:
+	from frappe.tests import IntegrationTestCase
+except ImportError:  # v15: the class still lives in frappe.tests.utils under its old name
+	from frappe.tests.utils import FrappeTestCase as IntegrationTestCase
 
 COMPANY = "_Test Company"
 WAREHOUSE = "Stores - _TC"
@@ -39,19 +43,27 @@ class TestPOSInvoiceConcurrentSubmitRace(IntegrationTestCase):
 		# each test gets its own item and customer, so tests are fully
 		# independent (no reservation pool leaks between them)
 
-		# develop defaults POS Settings to "Sales Invoice" mode, which refuses POS
-		# Invoices; the race lives in POS Invoice mode. Restore in tearDownClass.
-		cls.original_invoice_type = frappe.db.get_single_value("POS Settings", "invoice_type")
-		frappe.db.set_single_value("POS Settings", "invoice_type", "POS Invoice")
-		frappe.db.commit()
+		# develop/higher defaults POS Settings to "Sales Invoice" mode, which
+		# refuses POS Invoices the race lives in. The field does not exist on v15
+		# (where every POS sale is a POS Invoice), so guard by meta first.
+		fields = {f.name for f in frappe.get_meta("POS Settings").fields}
+		cls.original_invoice_type = (
+			frappe.db.get_single_value("POS Settings", "invoice_type") if "invoice_type" in fields else None
+		)
+		if "invoice_type" in fields:
+			frappe.db.set_single_value("POS Settings", "invoice_type", "POS Invoice")
+			frappe.db.commit()
 
 	@classmethod
 	def tearDownClass(cls):
 		try:
 			super().tearDownClass()
 		finally:
-			frappe.db.set_single_value("POS Settings", "invoice_type", cls.original_invoice_type)
-			frappe.db.commit()
+			if cls.original_invoice_type is not None and "invoice_type" in (
+				f.name for f in frappe.get_meta("POS Settings").fields
+			):
+				frappe.db.set_single_value("POS Settings", "invoice_type", cls.original_invoice_type)
+				frappe.db.commit()
 
 	@classmethod
 	def _cancel_delete(cls, doctype, filters):
